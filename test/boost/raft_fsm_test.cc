@@ -344,8 +344,9 @@ BOOST_AUTO_TEST_CASE(test_election_single_node) {
 
     auto output = fsm.get_output();
 
-    BOOST_CHECK(output.term);
-    BOOST_CHECK(output.vote);
+    BOOST_CHECK(output.term_and_vote);
+    BOOST_CHECK(output.term_and_vote->first);
+    BOOST_CHECK(output.term_and_vote->second);
     BOOST_CHECK(output.messages.empty());
     // A new leader applies one dummy entry
     BOOST_CHECK(output.log_entries.size() == 1 && std::holds_alternative<raft::log_entry::dummy>(output.log_entries[0]->data));
@@ -356,8 +357,7 @@ BOOST_AUTO_TEST_CASE(test_election_single_node) {
     election_timeout(fsm);
     BOOST_CHECK(fsm.is_leader());
     output = fsm.get_output();
-    BOOST_CHECK(!output.term);
-    BOOST_CHECK(!output.vote);
+    BOOST_CHECK(!output.term_and_vote);
     BOOST_CHECK(output.messages.empty());
     BOOST_CHECK(output.log_entries.empty());
     // Dummy entry is now commited
@@ -414,16 +414,17 @@ BOOST_AUTO_TEST_CASE(test_election_two_nodes) {
     BOOST_CHECK(fsm.is_candidate());
 
     auto output = fsm.get_output();
+    BOOST_CHECK(output.term_and_vote);
     // After a favourable reply, we become a leader (quorum is 2)
-    fsm.step(id2, raft::vote_reply{output.term, true});
+    fsm.step(id2, raft::vote_reply{output.term_and_vote->first, true});
     BOOST_CHECK(fsm.is_leader());
     // Out of order response to the previous election is ignored
-    fsm.step(id2, raft::vote_reply{output.term - term_t{1}, false});
+    fsm.step(id2, raft::vote_reply{output.term_and_vote->first - term_t{1}, false});
     assert(fsm.is_leader());
 
     // Vote request within the election timeout is ignored
     // (avoiding disruptive leaders).
-    fsm.step(id2, raft::vote_request{output.term + term_t{1}});
+    fsm.step(id2, raft::vote_request{output.term_and_vote->first + term_t{1}});
     BOOST_CHECK(fsm.is_leader());
     // Any message with a newer term after election timeout
     // -> immediately convert to follower
@@ -431,14 +432,15 @@ BOOST_AUTO_TEST_CASE(test_election_two_nodes) {
     election_threshold(fsm);
     // Use current_term + 2 to switch fsm to follower
     // even if it itself switched to a candidate
-    fsm.step(id2, raft::vote_request{output.term + term_t{2}});
+    fsm.step(id2, raft::vote_request{output.term_and_vote->first + term_t{2}});
     BOOST_CHECK(fsm.is_follower());
 
     // Check that the candidate converts to a follower as well
     election_timeout(fsm);
     BOOST_CHECK(fsm.is_candidate());
     output = fsm.get_output();
-    fsm.step(id2, raft::vote_request{output.term + term_t{1}});
+    BOOST_CHECK(output.term_and_vote);
+    fsm.step(id2, raft::vote_request{output.term_and_vote->first + term_t{1}});
     BOOST_CHECK(fsm.is_follower());
 
     // Test that a node doesn't cast a vote if it has voted for
@@ -496,12 +498,14 @@ BOOST_AUTO_TEST_CASE(test_election_four_nodes) {
     BOOST_CHECK(fsm.is_candidate());
 
     output = fsm.get_output();
+    BOOST_CHECK(output.term_and_vote);
+    auto current_term = output.term_and_vote->first;
     // Add a favourable reply, not enough for quorum
-    fsm.step(id2, raft::vote_reply{output.term, true});
+    fsm.step(id2, raft::vote_reply{current_term, true});
     BOOST_CHECK(fsm.is_candidate());
 
     // Add another one, this adds up to quorum
-    fsm.step(id3, raft::vote_reply{output.term, true});
+    fsm.step(id3, raft::vote_reply{current_term, true});
     BOOST_CHECK(fsm.is_leader());
 }
 
@@ -572,7 +576,8 @@ BOOST_AUTO_TEST_CASE(test_confchange_add_node) {
     election_timeout(fsm);
     BOOST_CHECK(fsm.is_candidate());
     auto output = fsm.get_output();
-    fsm.step(id2, raft::vote_reply{output.term, true});
+    BOOST_CHECK(output.term_and_vote);
+    fsm.step(id2, raft::vote_reply{output.term_and_vote->first, true});
     BOOST_CHECK(fsm.is_leader());
 
     output = fsm.get_output();
@@ -658,7 +663,8 @@ BOOST_AUTO_TEST_CASE(test_confchange_remove_node) {
     BOOST_CHECK(std::holds_alternative<raft::vote_request>(output.messages[0].second));
     BOOST_CHECK(std::holds_alternative<raft::vote_request>(output.messages[1].second));
 
-    fsm.step(id2, raft::vote_reply{output.term, true});
+    BOOST_CHECK(output.term_and_vote);
+    fsm.step(id2, raft::vote_reply{output.term_and_vote->first, true});
     BOOST_CHECK(fsm.is_leader());
     output = fsm.get_output();
     BOOST_CHECK(output.log_entries.size() == 1);
@@ -742,7 +748,8 @@ BOOST_AUTO_TEST_CASE(test_confchange_replace_node) {
     election_timeout(fsm);
     BOOST_CHECK(fsm.is_candidate());
     auto output = fsm.get_output();
-    fsm.step(id2, raft::vote_reply{output.term, true});
+    BOOST_CHECK(output.term_and_vote);
+    fsm.step(id2, raft::vote_reply{output.term_and_vote->first, true});
     BOOST_CHECK(fsm.is_leader());
     output = fsm.get_output();
     BOOST_CHECK(output.log_entries.size() == 1 && std::holds_alternative<raft::log_entry::dummy>(output.log_entries[0]->data));

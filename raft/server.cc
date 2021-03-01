@@ -200,7 +200,6 @@ future<> server_impl::start() {
                                      .append_request_threshold = _config.append_request_threshold,
                                      .max_log_size = _config.max_log_size
                                  });
-    assert(_fsm->get_current_term() != term_t(0));
 
     if (snp_id) {
         co_await _state_machine->load_snapshot(snp_id);
@@ -347,12 +346,12 @@ future<> server_impl::io_fiber(index_t last_stable) {
             auto batch = co_await _fsm->poll_output();
             _stats.polls++;
 
-            if (batch.term != term_t{}) {
+            if (batch.term_and_vote) {
                 // Current term and vote are always persisted
                 // together. A vote may change independently of
                 // term, but it's safe to update both in this
                 // case.
-                co_await _persistence->store_term_and_vote(batch.term, batch.vote);
+                co_await _persistence->store_term_and_vote(batch.term_and_vote->first, batch.term_and_vote->second);
                 _stats.store_term_and_vote++;
             }
 
